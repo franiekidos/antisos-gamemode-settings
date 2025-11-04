@@ -41,19 +41,16 @@ package() {
     cd "$srcdir/$_pkgname"
 
     # Install the main scripts to /usr/bin
-    install -Dm755 "gamemode-run.sh" "$pkgdir/usr/bin/gamemode-run.sh"
-    install -Dm755 "steamdeck-ui" "$pkgdir/usr/bin/steamdeck-ui"
-    install -Dm755 "es-de-run" "$pkgdir/usr/bin/es-de-run"
-
+    install -Dm755 "gamemode-run" "$pkgdir/usr/bin/gamemode-run"
     # Install the compiled application from the dist folder created by PyInstaller
     install -Dm755 "dist/antisos-gamemode-settings" "$pkgdir/usr/bin/antisos-gamemode-settings"
 
     # Install the SteamOS placeholder scripts
-    install -Dm755 "steamos-select-branch.sh" "$pkgdir/usr/bin/steamos-select-branch"
+    install -Dm755 "steamos-select-branch" "$pkgdir/usr/bin/steamos-select-branch"
     
     # Create the helper directory and install the dock updater script
     install -d "$pkgdir/usr/bin/steamos-polkit-helpers"
-    install -Dm755 "jupiter-dock-updater.sh" "$pkgdir/usr/bin/steamos-polkit-helpers/jupiter-dock-updater"
+    install -Dm755 "jupiter-dock-updater" "$pkgdir/usr/bin/steamos-polkit-helpers/jupiter-dock-updater"
 
     # Install the desktop and session files
     install -Dm644 "antisos-gamemode-settings.desktop" "$pkgdir/usr/share/applications/antisos-gamemode-settings.desktop"
