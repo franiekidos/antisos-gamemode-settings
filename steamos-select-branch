@@ -1,0 +1,18 @@
+#!/bin/bash
+#
+# Placeholder for the 'steamos-select-branch' utility.
+#
+# On a real SteamOS system, this script manages the OS update channel.
+# In this custom environment (antisOS), we provide a mock script
+# to satisfy the Steam Client when it's launched in Steam Deck mode.
+#
+# It responds to the '--current' flag by printing a static branch name.
+# Any other arguments are ignored.
+#
+
+if [[ "$1" == "--current" ]]; then
+  echo "stable"
+fi
+
+# Exit successfully regardless of arguments.
+exit 0

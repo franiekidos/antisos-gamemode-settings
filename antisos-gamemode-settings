@@ -1,0 +1,526 @@
+import gi
+import sys
+import subprocess
+import os
+import tempfile
+try:
+    
+    # We require GTK 3.0
+    gi.require_version('Gtk', '4.0')
+    gi.require_version('Gdk', '4.0')
+    from gi.repository import Gtk, Gdk, GObject
+    gi.require_version('Adw', '1')
+except ValueError:
+    print("-------------------------------------------------------------------------")
+    print("FATAL ERROR: PyGObject (GTK+ bindings) is not installed on this system.")
+    print("Please install the necessary packages (e.g., python3-gi gir1.2-gtk-3.0).")
+    print("-------------------------------------------------------------------------") 
+    sys.exit(1)
+    
+from gi.repository import Adw
+# --- Configuration and Constants ---
+
+# Add this helper function outside the class definition
+def get_gui_sudo_command():
+    """Tries to find a graphical sudo command available on the system."""
+
+ETC_ENV_PATH = "/etc/environment"
+
+# FIX FOR: AttributeError: 'gi.repository.Gtk' object has no attribute 'ApplicationFlags'
+# We will define the application flags robustly, defaulting to 0 (which is FLAGS_NONE)
+# if the constant is not exposed directly.
+APP_FLAGS = 0
+try:
+    APP_FLAGS = Gtk.ApplicationFlags.FLAGS_NONE
+except AttributeError:
+    # If the enum is missing, we stick with 0.
+    pass 
+
+def get_gui_sudo_command():
+    """Tries to find a graphical sudo command available on the system."""
+    for cmd in ["gksudo", "kdesudo", "lxqt-sudo", "pkexec"]:
+        if os.system(f"command -v {cmd} >/dev/null 2>&1") == 0:
+            return cmd
+    return None
+
+class GamescopeConfigApp(Gtk.ApplicationWindow):
+    """Main application window using GTK widgets and Polkit integration."""
+    def __init__(self, app):
+        super().__init__(application=app, title="antisOS Gamemode options", default_height=720)
+
+        # Variable to store generated content
+        self.env_content_raw_data = ""
+
+        main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        self.set_child(main_vbox)
+
+        # --- Header --- # Use append instead of pack_start for GTK4
+        header_label = Gtk.Label(label="antisOS Gamemode options", xalign=0)
+        header_label.set_markup("<span size='x-large' weight='bold'>antisOS Gamemode options</span>")
+        main_vbox.append(header_label)
+
+        info_label = Gtk.Label(label=f"Configure permanent environment variables for {ETC_ENV_PATH}.", xalign=0)
+        info_label.set_markup(f"<span foreground='gray' size='small'>Uses Polkit to apply changes to <tt>{ETC_ENV_PATH}</tt> securely.</span>")
+        main_vbox.append(info_label)
+
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        main_vbox.append(separator)
+
+        # --- Scrolled Window for Options ---
+        scrolled_window = Gtk.ScrolledWindow()
+        scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled_window.set_vexpand(True)
+        main_vbox.append(scrolled_window)
+
+        options_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15, margin_start=12, margin_end=12, margin_top=12)
+        scrolled_window.set_child(options_vbox)
+
+        # --- Configuration Grid ---
+        config_grid = Gtk.Grid()
+        config_grid.set_row_spacing(15)
+        config_grid.set_column_spacing(20)
+        options_vbox.append(config_grid)
+
+        row = 0
+
+        # 1. Resolution
+        config_grid.attach(Gtk.Label(label="Target Output Resolution:", xalign=0), 0, row, 1, 1)
+        self.resolution_combo = self._create_resolution_combo()
+        config_grid.attach(self.resolution_combo, 1, row, 1, 1)
+        row += 1
+
+        # 2. Refresh Rate
+        config_grid.attach(Gtk.Label(label="Monitor Max Refresh Rate (Hz):", xalign=0), 0, row, 1, 1)
+        self.rate_spin = Gtk.SpinButton.new_with_range(60, 360, 1)
+        self.rate_spin.set_value(144)
+        config_grid.attach(self.rate_spin, 1, row, 1, 1)
+        row += 1
+
+        # 3. Scaling Filter
+        config_grid.attach(Gtk.Label(label="Scaling Filter:", xalign=0), 0, row, 1, 1)
+        self.filter_combo = self._create_filter_combo()
+        config_grid.attach(self.filter_combo, 1, row, 1, 1)
+        row += 1
+
+        # 4. Geometry Override
+        config_grid.attach(Gtk.Label(label="Geometry Override (Optional):", xalign=0), 0, row, 1, 1)
+        self.geometry_entry = Gtk.Entry()
+        self.geometry_entry.set_placeholder_text("e.g., 1280x720@100,50")
+        config_grid.attach(self.geometry_entry, 1, row, 1, 1)
+        row += 1
+
+        # Internal Resolution
+        config_grid.attach(Gtk.Label(label="Internal Resolution (Optional):", xalign=0), 0, row, 1, 1)
+        self.internal_res_entry = Gtk.Entry()
+        self.internal_res_entry.set_placeholder_text("e.g., 1280x720")
+        config_grid.attach(self.internal_res_entry, 1, row, 1, 1)
+        row += 1
+
+        # 5. HDR Toggle
+        hdr_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        hdr_hbox.append(Gtk.Label(label="Enable HDR Support:"))
+        self.hdr_switch = Gtk.Switch()
+        self.hdr_switch.set_active(False)
+        hdr_hbox.append(self.hdr_switch)
+        config_grid.attach(hdr_hbox, 0, row, 2, 1)
+        row += 1
+
+        # Scaling Mode
+        config_grid.attach(Gtk.Label(label="Scaling Mode:", xalign=0), 0, row, 1, 1)
+        self.scaling_mode_combo = self._create_scaling_mode_combo()
+        config_grid.attach(self.scaling_mode_combo, 1, row, 1, 1)
+        row += 1
+
+        # FSR Sharpness
+        config_grid.attach(Gtk.Label(label="FSR Sharpness (0-20):", xalign=0), 0, row, 1, 1)
+        self.fsr_sharpness_spin = Gtk.SpinButton.new_with_range(0, 20, 1)
+        self.fsr_sharpness_spin.set_value(0)
+        config_grid.attach(self.fsr_sharpness_spin, 1, row, 1, 1)
+        row += 1
+
+        # SDR Gamut Wideness
+        config_grid.attach(Gtk.Label(label="SDR Gamut Wideness (0.0-1.0):", xalign=0), 0, row, 1, 1)
+        self.sdr_gamut_spin = Gtk.SpinButton.new_with_range(0.0, 1.0, 0.1)
+        self.sdr_gamut_spin.set_value(0.0)
+        config_grid.attach(self.sdr_gamut_spin, 1, row, 1, 1)
+        row += 1
+
+        # Wayland Support Toggle
+        wayland_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        wayland_hbox.append(Gtk.Label(label="Expose Wayland Client Support:"))
+        self.wayland_switch = Gtk.Switch()
+        self.wayland_switch.set_active(False)
+        wayland_hbox.append(self.wayland_switch)
+        config_grid.attach(wayland_hbox, 0, row, 2, 1)
+        row += 1
+
+        # Adaptive Sync Toggle
+        adaptive_sync_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        adaptive_sync_hbox.append(Gtk.Label(label="Enable Adaptive Sync (VRR):"))
+        self.adaptive_sync_switch = Gtk.Switch()
+        self.adaptive_sync_switch.set_active(False)
+        adaptive_sync_hbox.append(self.adaptive_sync_switch)
+        config_grid.attach(adaptive_sync_hbox, 0, row, 2, 1)
+        row += 1
+
+        # MangoHud Toggle
+        mangoapp_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        mangoapp_hbox.append(Gtk.Label(label="Enable MangoHud (mangoapp):"))
+        self.mangoapp_switch = Gtk.Switch()
+        self.mangoapp_switch.set_active(False)
+        mangoapp_hbox.append(self.mangoapp_switch)
+        config_grid.attach(mangoapp_hbox, 0, row, 2, 1)
+        row += 1
+
+        # --- Advanced Options Separator ---
+        options_vbox.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=10, margin_bottom=5))
+        adv_header_label = Gtk.Label(label="Advanced & Niche Options", xalign=0)
+        adv_header_label.set_markup("<span size='large' weight='bold'>Advanced &amp; Niche Options</span>")
+        options_vbox.append(adv_header_label)
+
+        # --- Advanced Grid ---
+        adv_grid = Gtk.Grid()
+        adv_grid.set_row_spacing(15)
+        adv_grid.set_column_spacing(20)
+        options_vbox.append(adv_grid)
+        
+        adv_row = 0
+
+        # Backend Selection
+        adv_grid.attach(Gtk.Label(label="Rendering Backend:", xalign=0), 0, adv_row, 1, 1)
+        self.backend_combo = self._create_backend_combo()
+        adv_grid.attach(self.backend_combo, 1, adv_row, 1, 1)
+        adv_row += 1
+
+        # Framerate Limit
+        adv_grid.attach(Gtk.Label(label="Framerate Limit (0=disabled):", xalign=0), 0, adv_row, 1, 1)
+        self.framerate_limit_spin = Gtk.SpinButton.new_with_range(0, 360, 1)
+        self.framerate_limit_spin.set_value(0)
+        adv_grid.attach(self.framerate_limit_spin, 1, adv_row, 1, 1)
+        adv_row += 1
+
+        # HDR SDR Content Nits
+        adv_grid.attach(Gtk.Label(label="HDR: SDR Content Nits:", xalign=0), 0, adv_row, 1, 1)
+        self.hdr_sdr_nits_spin = Gtk.SpinButton.new_with_range(0, 1000, 50)
+        self.hdr_sdr_nits_spin.set_value(400)
+        adv_grid.attach(self.hdr_sdr_nits_spin, 1, adv_row, 1, 1)
+        adv_row += 1
+
+        # Steam Integration Toggle
+        steam_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        steam_hbox.append(Gtk.Label(label="Enable Steam Integration:"))
+        self.steam_switch = Gtk.Switch()
+        self.steam_switch.set_active(False)
+        steam_hbox.append(self.steam_switch)
+        adv_grid.attach(steam_hbox, 0, adv_row, 2, 1)
+        adv_row += 1
+
+        # Nested Mode Toggles (Borderless, Fullscreen)
+        nested_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        nested_hbox.append(Gtk.Label(label="Nested Mode:"))
+        self.borderless_switch = Gtk.Switch()
+        nested_hbox.append(self.borderless_switch)
+        nested_hbox.append(Gtk.Label(label="Borderless"))
+        self.fullscreen_switch = Gtk.Switch()
+        nested_hbox.append(self.fullscreen_switch)
+        nested_hbox.append(Gtk.Label(label="Fullscreen"))
+        adv_grid.attach(nested_hbox, 0, adv_row, 2, 1)
+
+        # --- Generate Button ---
+        generate_button = Gtk.Button.new_with_label("Generate Configuration Preview")
+        generate_button.add_css_class("suggested-action")
+        generate_button.connect("clicked", self.on_generate_clicked)
+        main_vbox.append(generate_button)
+
+        # --- Output Section (initially hidden) ---
+        self.output_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.output_vbox.set_visible(False) 
+        main_vbox.append(self.output_vbox)
+
+        # Action Required Message Box
+        self.message_label = Gtk.Label()
+        self.message_label.set_wrap(True)
+        self.message_label.set_xalign(0)
+        self.output_vbox.append(self.message_label)
+        self.restore_message_label() 
+
+        # 1. /etc/environment Content Preview
+        self.output_vbox.append(Gtk.Label(label="<b>Variables to be Appended:</b>", use_markup=True, xalign=0))
+        self.env_content_label = Gtk.Label(xalign=0)
+        self.env_content_label.get_style_context().add_class("monospace-output")
+        self.env_content_label.set_selectable(True)
+        self.output_vbox.append(self.env_content_label)
+        
+        # 2. Apply Button (Replaces sudo command)
+        self.apply_button = Gtk.Button.new_with_label("Apply Changes (Requires Authentication)")
+        self.apply_button.add_css_class("suggested-action")
+        self.apply_button.connect("clicked", self.on_apply_clicked) # Use append instead of pack_start for GTK4
+        self.output_vbox.append(self.apply_button)
+
+
+    def _create_resolution_combo(self):
+        """Creates the resolution combo box."""
+        resolutions = ["1920x1080 (FHD (Default))", "2560x1440 (QHD)", "3840x2160 (4K)", "1280x720 (HD)"]
+        combo = Gtk.ComboBoxText.new()
+        for res in resolutions:
+            combo.append(res, res) # Use append(id, text) for Gtk.ComboBoxText
+        combo.set_active_id(resolutions[0]) # Set the first item as active by its ID
+        return combo
+
+    def _create_filter_combo(self):
+        """Creates the scaling filter combo box."""
+        filters = ["linear", "nearest", "fsr", "nis"]
+        combo = Gtk.ComboBoxText.new()
+        for f in filters:
+            combo.append(f, f)
+        combo.set_active_id(filters[0])
+        return combo
+
+    def _create_scaling_mode_combo(self):
+        """Creates the scaling mode combo box."""
+        modes = ["", "fit", "stretch", "integer"]
+        # Display "default" for the empty string option
+        display_modes = [mode if mode else "default" for mode in modes]
+        combo = Gtk.ComboBoxText.new()
+        for i, dm in enumerate(display_modes):
+            combo.append(modes[i], dm) # Use the actual mode as ID
+        combo.set_active_id(modes[0])
+        return combo
+
+    def _create_backend_combo(self):
+        """Creates the backend selection combo box."""
+        backends = ["auto", "drm", "sdl", "wayland", "headless", "openvr"] # Example backends
+        combo = Gtk.ComboBoxText.new()
+        for b in backends:
+            combo.append(b, b)
+        combo.set_active_id(backends[0])
+        return combo
+
+
+    def on_generate_clicked(self, button):
+        """Generates the configuration content and updates the preview section."""
+        # 1. Gather Inputs
+        res_text = self.resolution_combo.get_active_text()
+        res_text = res_text if res_text else "1920x1080 (FHD (Default))" # Fallback if no item is selected
+        resolution = res_text.split(' ')[0].strip()
+        width, height = resolution.split('x')
+
+        rate = int(self.rate_spin.get_value())
+        
+        filter_choice = self.filter_combo.get_active_text()
+        
+        geometry = self.geometry_entry.get_text().strip()
+        hdr_enabled = "true" if self.hdr_switch.get_active() else "false"
+
+
+        internal_res = self.internal_res_entry.get_text().strip()
+        internal_w, internal_h = "", ""
+        if 'x' in internal_res:
+            try:
+                internal_w, internal_h = internal_res.split('x')
+            except ValueError:
+                pass # Ignore if format is wrong
+        
+        scaling_mode = self.scaling_mode_combo.get_active_text()
+        scaling_mode = scaling_mode if scaling_mode != "default" else ""
+
+        fsr_sharpness = int(self.fsr_sharpness_spin.get_value())
+        sdr_gamut = self.sdr_gamut_spin.get_value()
+        wayland_enabled = "true" if self.wayland_switch.get_active() else "false"
+        adaptive_sync_enabled = "true" if self.adaptive_sync_switch.get_active() else "false"
+        mangoapp_enabled = "true" if self.mangoapp_switch.get_active() else "false"
+
+        backend = self.backend_combo.get_active_text()
+        framerate_limit = int(self.framerate_limit_spin.get_value())
+        hdr_sdr_nits = int(self.hdr_sdr_nits_spin.get_value())
+        steam_enabled = "true" if self.steam_switch.get_active() else "false"
+        borderless = "true" if self.borderless_switch.get_active() else "false"
+        fullscreen = "true" if self.fullscreen_switch.get_active() else "false"
+
+        geometry_val = geometry if geometry else ""
+
+        # 2. Generate /etc/environment content
+        env_content_raw = (
+f"""# antisOS Gamemode options (generated by Configurator)
+GAMESCOPE_W={width}
+GAMESCOPE_H={height}
+GAMESCOPE_w={internal_w}
+GAMESCOPE_h={internal_h}
+GAMESCOPE_R={rate}
+GAMESCOPE_FILTER={filter_choice}
+GAMESCOPE_S={scaling_mode}
+GAMESCOPE_FSR_SHARPNESS={fsr_sharpness}
+GAMESCOPE_GEOMETRY={geometry_val}
+GAMESCOPE_HDR_ENABLED={hdr_enabled}
+GAMESCOPE_EXPOSE_WAYLAND={wayland_enabled}
+GAMESCOPE_ADAPTIVE_SYNC={adaptive_sync_enabled}
+GAMESCOPE_SDR_GAMUT_WIDENESS={sdr_gamut:.1f}
+GAMESCOPE_MANGOAPP={mangoapp_enabled}
+GAMESCOPE_BACKEND={backend}
+GAMESCOPE_FRAMERATE_LIMIT={framerate_limit}
+GAMESCOPE_HDR_SDR_NITS={hdr_sdr_nits}
+GAMESCOPE_STEAM={steam_enabled}
+GAMESCOPE_BORDERLESS={borderless}
+GAMESCOPE_FULLSCREEN={fullscreen}"""
+        )
+
+        # 3. Update UI
+        self.env_content_raw_data = env_content_raw
+        self.env_content_label.set_text(env_content_raw)
+
+        self.output_vbox.set_visible(True)
+        self.restore_message_label() 
+
+    def on_apply_clicked(self, button):
+        """Executes the command using pkexec to apply changes."""
+        
+        if not self.env_content_raw_data:
+            self.show_dialog("Error", "Please generate the configuration preview first.", Gtk.MessageType.WARNING)
+            return
+
+        self.apply_button = button # Store reference
+        button.set_sensitive(False) # Disable button while application is running
+        
+        # 1. Prepare Content and Command
+        env_content = self.env_content_raw_data
+
+        # 1. Write the content to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, encoding='utf-8') as tmp_file:
+            tmp_file.write(env_content)
+            temp_path = tmp_file.name
+        
+        # The command to execute as root: mv -f /tmp/tempfile /etc/environment
+        command = ["sh", "-c", f"cat {temp_path} > {ETC_ENV_PATH}"]
+
+        # 2. Try standard GUI elevation tools first
+        gui_sudo = get_gui_sudo_command()
+        if gui_sudo and gui_sudo != "pkexec": # gksudo/kdesudo works better than pkexec with simple commands
+            full_command = [gui_sudo] + command
+            try:
+                # Use standard subprocess call for these tools, as they handle the GUI prompt internally
+                subprocess.run(full_command, check=True, text=True, capture_output=True)
+                self.show_dialog("Success", f"Configuration applied using {gui_sudo}.", Gtk.MessageType.INFO)
+                self.restore_message_label()
+                os.remove(temp_path) # Clean up temp file on success
+                button.set_sensitive(True)
+                return
+
+            except subprocess.CalledProcessError:
+                # User cancelled the standard prompt, fall through to custom prompt or exit gracefully
+                self.show_dialog("Info", "Standard authentication cancelled. Trying custom prompt fallback.", Gtk.MessageType.INFO)
+            except FileNotFoundError:
+                pass # Fall through if the command was found but the binary is gone
+
+        # 3. Fallback: Use pkexec
+        try:
+            # pkexec requires the full path to the command
+            pkexec_command = ["pkexec"] + command
+            
+            result = subprocess.run(pkexec_command, 
+                                    capture_output=True, 
+                                    text=True,
+                                    check=False) 
+
+            if result.returncode == 0:
+                self.show_dialog("Success", 
+                                 f"Configuration applied successfully to {ETC_ENV_PATH} using pkexec. "
+                                 "**Please reboot or log out/in immediately** for changes to take effect.", 
+                                 Gtk.MessageType.INFO)
+                self.restore_message_label()
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            else:
+                error_msg = result.stderr.strip() or f"pkexec failed with exit code {result.returncode}."
+                self.show_dialog("Failure", 
+                                 f"Failed to apply configuration via Polkit. Did you cancel the password prompt? Error: {error_msg}", 
+                                 Gtk.MessageType.ERROR)
+                self.restore_message_label()
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        except FileNotFoundError:
+            self.show_dialog("Error", "Polkit executable (`pkexec`) not found. Please ensure Polkit is installed.", Gtk.MessageType.ERROR)
+            self.restore_message_label()
+        except Exception as e:
+            self.show_dialog("Internal Error", f"An internal error occurred: {e}", Gtk.MessageType.ERROR)
+        
+        # Re-enable the button
+        button.set_sensitive(True)
+
+    def show_dialog(self, title, message, message_type):
+        """Displays a standard GTK Message Dialog."""
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True)
+        dialog.set_markup(f"<b>{title}</b>\n{message}")
+        # dialog.set_secondary_text(message) # This method is not available in GTK4 Gtk.MessageDialog
+        dialog.add_button("OK", Gtk.ResponseType.OK)
+        
+        # Map Gtk.MessageType to Adw.ResponseDialog's icon-name or similar if needed
+        # For now, we'll just set the message.
+
+        # Use markup to allow bold text in the message
+        dialog.present()
+        dialog.connect("response", lambda d, r: d.destroy())
+        dialog.destroy()
+
+    def restore_message_label(self, *args):
+        """Restores the warning message in the output section."""
+        self.message_label.set_markup(
+            "<span foreground='#c0392b' weight='bold'>ACTION REQUIRED:</span> "
+            "<span foreground='#c0392b'>Click 'Apply Changes' below to open the graphical password prompt.</span>"
+        ) # This will be replaced by Adwaita styles
+        self.message_label.remove_css_class("success")
+        self.message_label.add_css_class("error")
+        return False 
+
+
+class AdwaitaGamescopeApp(Adw.Application):
+    """Main PyGObject Application Class."""
+    def __init__(self):
+        super().__init__(application_id="com.antisos.GamemodeConfig", flags=APP_FLAGS)
+        self.connect("activate", self.on_activate)
+
+    def on_activate(self, app):
+        """Called when the application is activated."""
+        win = GamescopeConfigApp(app)
+        win.present()
+
+# --- Custom CSS for Adwaita Aesthetic (Dark Output Boxes) ---
+CSS_CODE = b"""
+.monospace-output {
+    font-family: monospace;
+    font-size: 10pt; /* Use a relative unit or a smaller fixed size for better scaling */
+    background-color: @theme_bg_color; /* Use Adwaita's background color */
+    color: @theme_fg_color; /* Use Adwaita's foreground color */
+    padding: 10px;
+    border-radius: 6px;
+}
+/* Adwaita-like styles for info/warning/error messages */
+.message-info {
+    background-color: @success_bg_color; /* Adwaita success color */
+    color: @success_fg_color;
+}
+.message-warning {
+    background-color: @warning_bg_color; /* Adwaita warning color */
+    color: @warning_fg_color;
+}
+.message-error {
+    background-color: @error_bg_color; /* Adwaita error color */
+    color: @error_fg_color;
+}
+"""
+
+css_provider = Gtk.CssProvider()
+css_provider.load_from_data(CSS_CODE)
+
+# In GTK 4, Gdk.Screen is deprecated.
+# We apply CSS to the default display.
+display = Gdk.Display.get_default()
+Gtk.StyleContext.add_provider_for_display(display, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+if __name__ == "__main__":
+    if not hasattr(subprocess, 'run'):
+        print("Python 3.5+ required for subprocess.run()")
+        sys.exit(1)
+        
+    app = AdwaitaGamescopeApp()
+    app.run(sys.argv)

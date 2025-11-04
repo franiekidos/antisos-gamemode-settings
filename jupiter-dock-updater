@@ -1,0 +1,11 @@
+#!/bin/bash
+#
+# Placeholder for the 'jupiter-dock-updater' utility.
+#
+# On a real SteamOS system, this script handles firmware updates for the
+# official Steam Deck Docking Station.
+#
+# In this custom environment (antisOS), we provide a mock script that
+# does nothing and exits successfully to satisfy the Steam Client.
+#
+exit 0
