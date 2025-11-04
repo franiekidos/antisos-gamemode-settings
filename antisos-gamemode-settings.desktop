@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=antisOS Gamemode Settings
+Comment=Configure Gamescope settings for the antisOS gamemode session
+Exec=/usr/bin/antisos-gamemode-settings
+Icon=video-display
+Terminal=false
+Type=Application
+Categories=Settings;Game;

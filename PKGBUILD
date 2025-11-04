@@ -25,7 +25,7 @@ sha256sums=('SKIP')
 package() {
     # Install the main scripts to /usr/bin
     install -Dm755 "$srcdir/antisos-gamemode-settings/gamemode-run" "$pkgdir/usr/bin/gamemode-run"
-    install -Dm755 "$srcdir/antisos-gamemode-settings/antisos-gamemode-settings.py" "$pkgdir/usr/bin/antisos-gamemode-settings.py"
+    install -Dm755 "$srcdir/antisos-gamemode-settings/antisos-gamemode-settings" "$pkgdir/usr/bin/antisos-gamemode-settings"
     install -Dm755 "$srcdir/antisos-gamemode-settings/steamdeck-ui" "$pkgdir/usr/bin/steamdeck-ui"
     install -Dm755 "$srcdir/antisos-gamemode-settings/es-de-run" "$pkgdir/usr/bin/es-de-run"
 
