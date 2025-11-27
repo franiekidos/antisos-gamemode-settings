@@ -7,6 +7,8 @@ pkgver() {
 }
 pkgdesc="Scripts and a GUI configurator for a SteamOS-like gamemode session using Gamescope."
 arch=('any')
+pkgver="1.0"
+pkgrel="1"
 url=""
 license=('MIT')
 depends=(
@@ -51,6 +53,7 @@ package() {
     # Create the helper directory and install the dock updater script
     install -d "$pkgdir/usr/bin/steamos-polkit-helpers"
     install -Dm755 "jupiter-dock-updater" "$pkgdir/usr/bin/steamos-polkit-helpers/jupiter-dock-updater"
+    install -Dm755 "aosgmrlaunch" "$pkgdir/usr/bin/aosgmrlaunch"
 
     # Install the desktop and session files
     install -Dm644 "antisos-gamemode-settings.desktop" "$pkgdir/usr/share/applications/antisos-gamemode-settings.desktop"

@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# --- AntisOS Gamemode Session Launcher ---
+# This script launches predefined gamemode environments based on flags.
+
+# NOTE: This script assumes a 'gamemode-run' executable or function is available 
+# in the environment to launch the specific sessions (e.g., 'ES-DE', 'steamdeck_ui').
+# Replace 'gamemode-run' with the actual command used in your system if needed.
+
+# Check the first argument provided to the script
+case "$1" in
+    # Case for Steam Deck Emulation / ES-DE Mode
+    "--es-de")
+        echo "Launching Steam Deck Emulation (ES-DE) Gamemode..."
+        # Execute the predefined command for ES-DE
+        gamemode-run ES-DE
+        ;;
+
+    # Case for Steam Deck UI Mode
+    "--steam")
+        echo "Launching Steam Deck UI Gamemode..."
+        # Execute the predefined command for the Steam Deck UI
+        gamemode-run steamdeck_ui
+        ;;
+
+    # Default case (Help/No Argument)
+    *)
+        echo "AntisOS Gamemode Session Launcher"
+        echo "Usage: $0 [OPTION]"
+        echo ""
+        echo "Options:"
+        echo "  --es-de    Launch the Steam Deck Emulation (ES-DE) environment."
+        echo "  --steam    Launch the Steam Deck UI environment."
+        echo ""
+        echo "Example: $0 --es-de"
+        exit 1
+        ;;
+esac
+
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "ERROR: The 'gamemode-run' command failed with exit code $EXIT_CODE."
+    echo "Please ensure the 'gamemode-run' application is correctly installed and configured."
+fi
+
+exit $EXIT_CODE

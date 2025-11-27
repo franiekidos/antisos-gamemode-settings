@@ -3,37 +3,33 @@ import sys
 import subprocess
 import os
 import tempfile
+# Import GLib for robust error handling, often necessary with gi
+from gi.repository import GLib 
+
 try:
     
-    # We require GTK 3.0
+    # We require GTK 4.0 and Adwaita 1
     gi.require_version('Gtk', '4.0')
     gi.require_version('Gdk', '4.0')
     from gi.repository import Gtk, Gdk, GObject
     gi.require_version('Adw', '1')
-except ValueError:
+    from gi.repository import Adw
+except ValueError as e:
     print("-------------------------------------------------------------------------")
-    print("FATAL ERROR: PyGObject (GTK+ bindings) is not installed on this system.")
-    print("Please install the necessary packages (e.g., python3-gi gir1.2-gtk-3.0).")
+    print(f"FATAL ERROR: PyGObject or Adwaita is not installed. Details: {e}")
+    print("Please install the necessary packages (e.g., python3-gi gir1.2-gtk-4.0 libadwaita-1).")
     print("-------------------------------------------------------------------------") 
     sys.exit(1)
     
-from gi.repository import Adw
 # --- Configuration and Constants ---
-
-# Add this helper function outside the class definition
-def get_gui_sudo_command():
-    """Tries to find a graphical sudo command available on the system."""
 
 ETC_ENV_PATH = "/etc/environment"
 
-# FIX FOR: AttributeError: 'gi.repository.Gtk' object has no attribute 'ApplicationFlags'
-# We will define the application flags robustly, defaulting to 0 (which is FLAGS_NONE)
-# if the constant is not exposed directly.
+# Define the application flags robustly
 APP_FLAGS = 0
 try:
     APP_FLAGS = Gtk.ApplicationFlags.FLAGS_NONE
 except AttributeError:
-    # If the enum is missing, we stick with 0.
     pass 
 
 def get_gui_sudo_command():
@@ -46,33 +42,51 @@ def get_gui_sudo_command():
 class GamescopeConfigApp(Gtk.ApplicationWindow):
     """Main application window using GTK widgets and Polkit integration."""
     def __init__(self, app):
+        # NOTE: Using Adw.ApplicationWindow is often more robust than Gtk.ApplicationWindow
+        # when using Adwaita, but for simplicity, we stick to Gtk.ApplicationWindow
+        # as the parent class, ensuring 'application=app' is passed.
         super().__init__(application=app, title="antisOS Gamemode options", default_height=720)
 
         # Variable to store generated content
         self.env_content_raw_data = ""
 
+        # Setup the main layout using Adwaita's standard layout structures
+        self.header_bar = Adw.HeaderBar.new()
+        self.set_titlebar(self.header_bar)
+
         main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        main_vbox.set_margin_top(15)
+        main_vbox.set_margin_bottom(15)
         self.set_child(main_vbox)
 
-        # --- Header --- # Use append instead of pack_start for GTK4
+        # Use an Adw.Clamp to control max width for better aesthetic
+        clamp = Adw.Clamp.new()
+        main_vbox.append(clamp)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        content_box.set_margin_start(12)
+        content_box.set_margin_end(12)
+        clamp.set_child(content_box)
+
+        # --- Header --- 
         header_label = Gtk.Label(label="antisOS Gamemode options", xalign=0)
-        header_label.set_markup("<span size='x-large' weight='bold'>antisOS Gamemode options</span>")
-        main_vbox.append(header_label)
+        header_label.add_css_class("title-1")
+        content_box.append(header_label)
 
         info_label = Gtk.Label(label=f"Configure permanent environment variables for {ETC_ENV_PATH}.", xalign=0)
         info_label.set_markup(f"<span foreground='gray' size='small'>Uses Polkit to apply changes to <tt>{ETC_ENV_PATH}</tt> securely.</span>")
-        main_vbox.append(info_label)
+        content_box.append(info_label)
 
         separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        main_vbox.append(separator)
+        content_box.append(separator)
 
         # --- Scrolled Window for Options ---
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled_window.set_vexpand(True)
-        main_vbox.append(scrolled_window)
+        content_box.append(scrolled_window)
 
-        options_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15, margin_start=12, margin_end=12, margin_top=12)
+        options_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15, margin_top=12)
         scrolled_window.set_child(options_vbox)
 
         # --- Configuration Grid ---
@@ -163,12 +177,12 @@ class GamescopeConfigApp(Gtk.ApplicationWindow):
         config_grid.attach(adaptive_sync_hbox, 0, row, 2, 1)
         row += 1
 
-        # MangoHud Toggle
+        # MangoHud Wrapper Toggle
         mangoapp_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        mangoapp_hbox.append(Gtk.Label(label="Enable MangoHud (mangoapp):"))
-        self.mangoapp_switch = Gtk.Switch()
-        self.mangoapp_switch.set_active(False)
-        mangoapp_hbox.append(self.mangoapp_switch)
+        mangoapp_hbox.append(Gtk.Label(label="Enable MangoHud Wrapper (External):"))
+        self.mangohud_wrapper_switch = Gtk.Switch()
+        self.mangohud_wrapper_switch.set_active(False)
+        mangoapp_hbox.append(self.mangohud_wrapper_switch)
         config_grid.attach(mangoapp_hbox, 0, row, 2, 1)
         row += 1
 
@@ -230,31 +244,34 @@ class GamescopeConfigApp(Gtk.ApplicationWindow):
         generate_button = Gtk.Button.new_with_label("Generate Configuration Preview")
         generate_button.add_css_class("suggested-action")
         generate_button.connect("clicked", self.on_generate_clicked)
-        main_vbox.append(generate_button)
+        content_box.append(generate_button)
 
         # --- Output Section (initially hidden) ---
         self.output_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.output_vbox.set_visible(False) 
-        main_vbox.append(self.output_vbox)
+        content_box.append(self.output_vbox)
 
         # Action Required Message Box
         self.message_label = Gtk.Label()
         self.message_label.set_wrap(True)
         self.message_label.set_xalign(0)
+        # Apply CSS class for styling the warning box
+        self.message_label.add_css_class("message-warning-box")
         self.output_vbox.append(self.message_label)
         self.restore_message_label() 
 
         # 1. /etc/environment Content Preview
         self.output_vbox.append(Gtk.Label(label="<b>Variables to be Appended:</b>", use_markup=True, xalign=0))
         self.env_content_label = Gtk.Label(xalign=0)
-        self.env_content_label.get_style_context().add_class("monospace-output")
+        # Apply CSS class for monospace output
+        self.env_content_label.add_css_class("monospace-output")
         self.env_content_label.set_selectable(True)
         self.output_vbox.append(self.env_content_label)
         
         # 2. Apply Button (Replaces sudo command)
         self.apply_button = Gtk.Button.new_with_label("Apply Changes (Requires Authentication)")
         self.apply_button.add_css_class("suggested-action")
-        self.apply_button.connect("clicked", self.on_apply_clicked) # Use append instead of pack_start for GTK4
+        self.apply_button.connect("clicked", self.on_apply_clicked)
         self.output_vbox.append(self.apply_button)
 
 
@@ -263,8 +280,8 @@ class GamescopeConfigApp(Gtk.ApplicationWindow):
         resolutions = ["1920x1080 (FHD (Default))", "2560x1440 (QHD)", "3840x2160 (4K)", "1280x720 (HD)"]
         combo = Gtk.ComboBoxText.new()
         for res in resolutions:
-            combo.append(res, res) # Use append(id, text) for Gtk.ComboBoxText
-        combo.set_active_id(resolutions[0]) # Set the first item as active by its ID
+            combo.append(res, res)
+        combo.set_active_id(resolutions[0])
         return combo
 
     def _create_filter_combo(self):
@@ -283,13 +300,13 @@ class GamescopeConfigApp(Gtk.ApplicationWindow):
         display_modes = [mode if mode else "default" for mode in modes]
         combo = Gtk.ComboBoxText.new()
         for i, dm in enumerate(display_modes):
-            combo.append(modes[i], dm) # Use the actual mode as ID
+            combo.append(modes[i], dm)
         combo.set_active_id(modes[0])
         return combo
 
     def _create_backend_combo(self):
         """Creates the backend selection combo box."""
-        backends = ["auto", "drm", "sdl", "wayland", "headless", "openvr"] # Example backends
+        backends = ["auto", "drm", "sdl", "wayland", "headless", "openvr"]
         combo = Gtk.ComboBoxText.new()
         for b in backends:
             combo.append(b, b)
@@ -301,7 +318,7 @@ class GamescopeConfigApp(Gtk.ApplicationWindow):
         """Generates the configuration content and updates the preview section."""
         # 1. Gather Inputs
         res_text = self.resolution_combo.get_active_text()
-        res_text = res_text if res_text else "1920x1080 (FHD (Default))" # Fallback if no item is selected
+        res_text = res_text if res_text else "1920x1080 (FHD (Default))"
         resolution = res_text.split(' ')[0].strip()
         width, height = resolution.split('x')
 
@@ -319,7 +336,7 @@ class GamescopeConfigApp(Gtk.ApplicationWindow):
             try:
                 internal_w, internal_h = internal_res.split('x')
             except ValueError:
-                pass # Ignore if format is wrong
+                pass
         
         scaling_mode = self.scaling_mode_combo.get_active_text()
         scaling_mode = scaling_mode if scaling_mode != "default" else ""
@@ -328,7 +345,9 @@ class GamescopeConfigApp(Gtk.ApplicationWindow):
         sdr_gamut = self.sdr_gamut_spin.get_value()
         wayland_enabled = "true" if self.wayland_switch.get_active() else "false"
         adaptive_sync_enabled = "true" if self.adaptive_sync_switch.get_active() else "false"
-        mangoapp_enabled = "true" if self.mangoapp_switch.get_active() else "false"
+        
+        # CRITICAL FIX: Use MANGOHUD_WRAPPER_ENABLED and set GAMESCOPE_MANGOAPP=false
+        mangohud_wrapper_enabled = "true" if self.mangohud_wrapper_switch.get_active() else "false"
 
         backend = self.backend_combo.get_active_text()
         framerate_limit = int(self.framerate_limit_spin.get_value())
@@ -355,7 +374,9 @@ GAMESCOPE_HDR_ENABLED={hdr_enabled}
 GAMESCOPE_EXPOSE_WAYLAND={wayland_enabled}
 GAMESCOPE_ADAPTIVE_SYNC={adaptive_sync_enabled}
 GAMESCOPE_SDR_GAMUT_WIDENESS={sdr_gamut:.1f}
-GAMESCOPE_MANGOAPP={mangoapp_enabled}
+# IMPORTANT: GAMESCOPE_MANGOAPP must be false when using external wrapper
+GAMESCOPE_MANGOAPP=false
+MANGOHUD_WRAPPER_ENABLED={mangohud_wrapper_enabled}
 GAMESCOPE_BACKEND={backend}
 GAMESCOPE_FRAMERATE_LIMIT={framerate_limit}
 GAMESCOPE_HDR_SDR_NITS={hdr_sdr_nits}
@@ -369,7 +390,7 @@ GAMESCOPE_FULLSCREEN={fullscreen}"""
         self.env_content_label.set_text(env_content_raw)
 
         self.output_vbox.set_visible(True)
-        self.restore_message_label() 
+        self.restore_message_label()
 
     def on_apply_clicked(self, button):
         """Executes the command using pkexec to apply changes."""
@@ -378,104 +399,111 @@ GAMESCOPE_FULLSCREEN={fullscreen}"""
             self.show_dialog("Error", "Please generate the configuration preview first.", Gtk.MessageType.WARNING)
             return
 
-        self.apply_button = button # Store reference
         button.set_sensitive(False) # Disable button while application is running
         
         # 1. Prepare Content and Command
         env_content = self.env_content_raw_data
 
         # 1. Write the content to a temporary file
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False, encoding='utf-8') as tmp_file:
-            tmp_file.write(env_content)
-            temp_path = tmp_file.name
-        
-        # The command to execute as root: mv -f /tmp/tempfile /etc/environment
-        command = ["sh", "-c", f"cat {temp_path} > {ETC_ENV_PATH}"]
-
-        # 2. Try standard GUI elevation tools first
-        gui_sudo = get_gui_sudo_command()
-        if gui_sudo and gui_sudo != "pkexec": # gksudo/kdesudo works better than pkexec with simple commands
-            full_command = [gui_sudo] + command
-            try:
-                # Use standard subprocess call for these tools, as they handle the GUI prompt internally
-                subprocess.run(full_command, check=True, text=True, capture_output=True)
-                self.show_dialog("Success", f"Configuration applied using {gui_sudo}.", Gtk.MessageType.INFO)
-                self.restore_message_label()
-                os.remove(temp_path) # Clean up temp file on success
-                button.set_sensitive(True)
-                return
-
-            except subprocess.CalledProcessError:
-                # User cancelled the standard prompt, fall through to custom prompt or exit gracefully
-                self.show_dialog("Info", "Standard authentication cancelled. Trying custom prompt fallback.", Gtk.MessageType.INFO)
-            except FileNotFoundError:
-                pass # Fall through if the command was found but the binary is gone
-
-        # 3. Fallback: Use pkexec
+        temp_path = ""
         try:
-            # pkexec requires the full path to the command
-            pkexec_command = ["pkexec"] + command
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False, encoding='utf-8') as tmp_file:
+                tmp_file.write(env_content)
+                temp_path = tmp_file.name
             
-            result = subprocess.run(pkexec_command, 
-                                    capture_output=True, 
-                                    text=True,
-                                    check=False) 
+            # The command to execute as root: cat /tmp/tempfile > /etc/environment
+            # We use 'sh -c' to ensure redirection works correctly under pkexec/GUI sudo tools
+            command = ["sh", "-c", f"cat {temp_path} > {ETC_ENV_PATH}"]
 
-            if result.returncode == 0:
-                self.show_dialog("Success", 
-                                 f"Configuration applied successfully to {ETC_ENV_PATH} using pkexec. "
-                                 "**Please reboot or log out/in immediately** for changes to take effect.", 
-                                 Gtk.MessageType.INFO)
-                self.restore_message_label()
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-            else:
-                error_msg = result.stderr.strip() or f"pkexec failed with exit code {result.returncode}."
-                self.show_dialog("Failure", 
-                                 f"Failed to apply configuration via Polkit. Did you cancel the password prompt? Error: {error_msg}", 
-                                 Gtk.MessageType.ERROR)
-                self.restore_message_label()
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+            # 2. Try standard GUI elevation tools first
+            gui_sudo = get_gui_sudo_command()
+            success = False
+            
+            if gui_sudo and gui_sudo != "pkexec":
+                full_command = [gui_sudo] + command
+                try:
+                    subprocess.run(full_command, check=True, text=True, capture_output=True)
+                    self.show_dialog("Success", f"Configuration applied using {gui_sudo}.", Gtk.MessageType.INFO)
+                    success = True
+                except subprocess.CalledProcessError:
+                    self.show_dialog("Info", "Standard authentication cancelled or failed. Falling back to pkexec.", Gtk.MessageType.INFO)
+                except FileNotFoundError:
+                    pass # Fall through to pkexec if the command is missing
 
+            # 3. Fallback: Use pkexec if not successful yet
+            if not success:
+                pkexec_command = ["pkexec"] + command
+                
+                result = subprocess.run(pkexec_command, 
+                                        capture_output=True, 
+                                        text=True,
+                                        check=False) 
+
+                if result.returncode == 0:
+                    self.show_dialog("Success", 
+                                     f"Configuration applied successfully to {ETC_ENV_PATH} using pkexec. "
+                                     "<b>Please reboot or log out/in immediately</b> for changes to take effect.", 
+                                     Gtk.MessageType.INFO)
+                    success = True
+                else:
+                    error_msg = result.stderr.strip() or f"pkexec failed with exit code {result.returncode}."
+                    self.show_dialog("Failure", 
+                                     f"Failed to apply configuration via Polkit. Did you cancel the prompt? Error: {error_msg}", 
+                                     Gtk.MessageType.ERROR)
+            
         except FileNotFoundError:
-            self.show_dialog("Error", "Polkit executable (`pkexec`) not found. Please ensure Polkit is installed.", Gtk.MessageType.ERROR)
-            self.restore_message_label()
+            self.show_dialog("Error", "Required executable not found (e.g., pkexec or sh).", Gtk.MessageType.ERROR)
         except Exception as e:
             self.show_dialog("Internal Error", f"An internal error occurred: {e}", Gtk.MessageType.ERROR)
-        
-        # Re-enable the button
-        button.set_sensitive(True)
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError as e:
+                    print(f"Error cleaning up temporary file {temp_path}: {e}")
+            
+            self.restore_message_label()
+            button.set_sensitive(True)
 
     def show_dialog(self, title, message, message_type):
-        """Displays a standard GTK Message Dialog."""
-        dialog = Gtk.MessageDialog(transient_for=self, modal=True)
-        dialog.set_markup(f"<b>{title}</b>\n{message}")
-        # dialog.set_secondary_text(message) # This method is not available in GTK4 Gtk.MessageDialog
-        dialog.add_button("OK", Gtk.ResponseType.OK)
+        """
+        Displays an Adwaita Message Dialog.
+        message_type is used to select the icon/style.
+        """
+        dialog = Adw.MessageDialog.new(
+            self,
+            heading=title, # Fix: Use 'heading' instead of 'title' for Adw.MessageDialog
+            body=message
+        )
+        dialog.add_response("ok", "OK")
         
-        # Map Gtk.MessageType to Adw.ResponseDialog's icon-name or similar if needed
-        # For now, we'll just set the message.
-
-        # Use markup to allow bold text in the message
-        dialog.present()
+        # Set appropriate icon based on message_type
+        if message_type == Gtk.MessageType.ERROR:
+            dialog.set_icon_name("dialog-error-symbolic")
+            dialog.set_response_appearance("ok", Adw.ResponseAppearance.DESTRUCTIVE)
+        elif message_type == Gtk.MessageType.WARNING:
+            dialog.set_icon_name("dialog-warning-symbolic")
+        elif message_type == Gtk.MessageType.INFO:
+            dialog.set_icon_name("dialog-information-symbolic")
+        
+        # Connect to response signal to destroy the dialog safely
         dialog.connect("response", lambda d, r: d.destroy())
-        dialog.destroy()
+        dialog.present()
+
 
     def restore_message_label(self, *args):
         """Restores the warning message in the output section."""
         self.message_label.set_markup(
-            "<span foreground='#c0392b' weight='bold'>ACTION REQUIRED:</span> "
-            "<span foreground='#c0392b'>Click 'Apply Changes' below to open the graphical password prompt.</span>"
-        ) # This will be replaced by Adwaita styles
-        self.message_label.remove_css_class("success")
-        self.message_label.add_css_class("error")
+            "<b>ACTION REQUIRED:</b> "
+            "Click 'Apply Changes' below to open the graphical password prompt."
+        )
         return False 
 
 
 class AdwaitaGamescopeApp(Adw.Application):
     """Main PyGObject Application Class."""
     def __init__(self):
+        # We explicitly set 'flags=APP_FLAGS' here
         super().__init__(application_id="com.antisos.GamemodeConfig", flags=APP_FLAGS)
         self.connect("activate", self.on_activate)
 
@@ -484,43 +512,57 @@ class AdwaitaGamescopeApp(Adw.Application):
         win = GamescopeConfigApp(app)
         win.present()
 
-# --- Custom CSS for Adwaita Aesthetic (Dark Output Boxes) ---
+# --- Custom CSS for Adwaita Aesthetic ---
 CSS_CODE = b"""
+/* Style for the configuration output box */
 .monospace-output {
     font-family: monospace;
-    font-size: 10pt; /* Use a relative unit or a smaller fixed size for better scaling */
-    background-color: @theme_bg_color; /* Use Adwaita's background color */
-    color: @theme_fg_color; /* Use Adwaita's foreground color */
+    font-size: 10pt;
     padding: 10px;
     border-radius: 6px;
+    /* Use Adwaita classes for colors when possible, but fallbacks are safer for output blocks */
+    background-color: @panel_bg_color;
+    color: @text_color;
+    border: 1px solid @borders_color;
 }
-/* Adwaita-like styles for info/warning/error messages */
-.message-info {
-    background-color: @success_bg_color; /* Adwaita success color */
-    color: @success_fg_color;
+
+/* Style for the ACTION REQUIRED message box */
+.message-warning-box {
+    background-color: #f7e6e5; /* Light red/pinkish background */
+    color: #c0392b; /* Dark red text */
+    padding: 10px;
+    border-radius: 6px;
+    font-weight: bold;
+    border: 1px solid #c0392b;
 }
-.message-warning {
-    background-color: @warning_bg_color; /* Adwaita warning color */
-    color: @warning_fg_color;
-}
-.message-error {
-    background-color: @error_bg_color; /* Adwaita error color */
-    color: @error_fg_color;
+
+/* Green suggested action button */
+.suggested-action {
+    padding: 10px;
+    font-weight: bold;
 }
 """
 
 css_provider = Gtk.CssProvider()
-css_provider.load_from_data(CSS_CODE)
+try:
+    css_provider.load_from_data(CSS_CODE)
+except GLib.Error as e:
+    # Print error but don't halt application for CSS issues
+    print(f"Error loading CSS: {e}")
 
-# In GTK 4, Gdk.Screen is deprecated.
-# We apply CSS to the default display.
+# Apply CSS to the default display.
 display = Gdk.Display.get_default()
-Gtk.StyleContext.add_provider_for_display(display, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+if display:
+    Gtk.StyleContext.add_provider_for_display(display, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
 if __name__ == "__main__":
     if not hasattr(subprocess, 'run'):
         print("Python 3.5+ required for subprocess.run()")
         sys.exit(1)
-        
+    
+    print("Application Setup Complete. Attempting to run Gtk main loop...")
     app = AdwaitaGamescopeApp()
-    app.run(sys.argv)
+    
+    # CRITICAL: If the application doesn't run, the return code is non-zero
+    # This line ensures the GTK application loop is entered correctly.
+    sys.exit(app.run(sys.argv))

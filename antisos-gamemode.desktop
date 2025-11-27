@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=antisOS Gamemode
 Comment=Launch the antisOS Gamescope session (Steam Deck UI)
-Exec=/usr/bin/steamdeck-ui
+Exec=/usr/bin/aosgmrlaunch --steam
 Type=Application
 DesktopNames=gamemode
+StartupNotify=true
