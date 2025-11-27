@@ -13,14 +13,14 @@ case "$1" in
     "--es-de")
         echo "Launching Steam Deck Emulation (ES-DE) Gamemode..."
         # Execute the predefined command for ES-DE
-        gamemode-run ES-DE
+        gamemode-run es-de
         ;;
 
     # Case for Steam Deck UI Mode
     "--steam")
         echo "Launching Steam Deck UI Gamemode..."
         # Execute the predefined command for the Steam Deck UI
-        gamemode-run steamdeck_ui
+        gamemode-run steam -steamos3 -gamepadui -steamdeck -steampal
         ;;
 
     # Default case (Help/No Argument)
